@@ -136,6 +136,8 @@
     </main>
 
     <script>
+      const SERVERLESS_MODE = {{ "true" if serverless_mode else "false" }};
+      const POLLING_MS = Math.max(5000, {{ polling_seconds }} * 1000);
       const state = {
         dashboard: null,
         strategies: [],
@@ -352,6 +354,17 @@
       async function init() {
         await Promise.all([loadStrategies(), loadDashboard()]);
         bindEvents();
+        if (SERVERLESS_MODE) {
+          statusPill.textContent = "Polling";
+          statusPill.className = "good";
+          setInterval(() => {
+            loadDashboard().catch((err) => {
+              statusPill.textContent = `Erro: ${err.message}`;
+              statusPill.className = "bad";
+            });
+          }, POLLING_MS);
+          return;
+        }
         connectWS();
       }
 
@@ -410,6 +423,15 @@
         };
         ws.onmessage = (event) => {
           const msg = JSON.parse(event.data);
+          if (msg.event === "disabled") {
+            statusPill.textContent = "Polling";
+            statusPill.className = "good";
+            ws.close();
+            setInterval(() => {
+              loadDashboard().catch(() => {});
+            }, POLLING_MS);
+            return;
+          }
           if (msg.event === "dashboard" && msg.data) {
             renderDashboard(msg.data);
           }

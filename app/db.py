@@ -45,7 +45,9 @@ STRATEGY_SEEDS: tuple[StrategySeed, ...] = (
 
 class Database:
     def __init__(self, db_path: str) -> None:
-        self._db_path = str(Path(db_path).resolve())
+        path = Path(db_path).resolve()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._db_path = str(path)
         self._lock = threading.Lock()
         self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row

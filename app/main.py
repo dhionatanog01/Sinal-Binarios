@@ -49,6 +49,11 @@ def normalize_pair(pair: str) -> str:
     return raw
 
 
+async def maybe_serverless_tick() -> None:
+    if settings.serverless_mode:
+        await engine.step()
+
+
 app = FastAPI(title=settings.app_name, version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
@@ -71,12 +76,14 @@ engine = SignalEngine(settings=settings, db=db, provider=provider, ws_manager=ws
 @app.on_event("startup")
 async def on_startup() -> None:
     db.init()
-    engine.start()
+    if not settings.serverless_mode:
+        engine.start()
 
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
-    await engine.stop()
+    if not settings.serverless_mode:
+        await engine.stop()
     await provider.close()
     db.close()
 
@@ -90,13 +97,14 @@ async def index(request: Request) -> HTMLResponse:
             "app_name": settings.app_name,
             "pairs": settings.pairs,
             "polling_seconds": settings.polling_seconds,
+            "serverless_mode": settings.serverless_mode,
         },
     )
 
 
 @app.get("/api/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok"}
+    return {"status": "ok", "mode": "serverless" if settings.serverless_mode else "worker"}
 
 
 @app.get("/api/pairs")
@@ -137,6 +145,7 @@ async def select_strategy(payload: SelectStrategyRequest) -> dict[str, object]:
 
 @app.get("/api/dashboard")
 async def dashboard() -> dict[str, object]:
+    await maybe_serverless_tick()
     ranking = db.get_strategy_ranking()
     selected = db.get_selected_strategy()
     prices = engine.snapshot_prices()
@@ -152,6 +161,7 @@ async def dashboard() -> dict[str, object]:
 
 @app.get("/api/signals")
 async def signals(status: str | None = None, limit: int = 80) -> dict[str, object]:
+    await maybe_serverless_tick()
     if limit < 1 or limit > 500:
         raise HTTPException(status_code=400, detail="limit must be 1..500")
     valid_status = {"open", "settled", "suppressed", "expired", None}
@@ -170,6 +180,7 @@ async def tradingview_webhook(payload: TradingViewWebhookPayload) -> dict[str, o
     now = utc_now()
     entry_price = payload.entry_price
     if entry_price is None:
+        await maybe_serverless_tick()
         entry_price = engine.latest_price(pair)
     if entry_price is None:
         raise HTTPException(
@@ -213,6 +224,11 @@ async def tradingview_webhook(payload: TradingViewWebhookPayload) -> dict[str, o
 
 @app.websocket("/ws/live")
 async def ws_live(websocket: WebSocket) -> None:
+    if settings.serverless_mode:
+        await websocket.accept()
+        await websocket.send_json({"event": "disabled", "message": "WebSocket disabled in serverless mode"})
+        await websocket.close(code=1001)
+        return
     await ws_manager.connect(websocket)
     try:
         await websocket.send_json({"event": "connected", "message": "live stream connected"})

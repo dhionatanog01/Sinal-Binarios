@@ -29,6 +29,8 @@ Campos principais:
 - `MIN_SIGNAL_GAP_SECONDS`: intervalo minimo entre sinais repetidos da mesma estrategia/par
 - `BROKER_WEBHOOK_URL`: endpoint da sua plataforma de execucao
 - `BROKER_AUTH_TOKEN`: token Bearer opcional para envio dos sinais
+- `DB_PATH`: caminho do banco local (em Vercel usa temporario automaticamente)
+- `SERVERLESS_MODE`: forcar modo serverless (`1`)
 
 ## 3) Webhook TradingView
 
@@ -50,7 +52,21 @@ Payload exemplo:
 }
 ```
 
-## 4) Deploy no Render (online)
+## 4) Deploy no Vercel (online)
+
+Este projeto ja inclui `vercel.json` e `api/index.py` para rodar FastAPI em serverless.
+
+Passos:
+
+1. Importe o repositorio no Vercel.
+2. Framework Preset: **Other**.
+3. Build Command: vazio (padrao).
+4. Output Directory: vazio.
+5. Deploy.
+
+No Vercel, a atualizacao de dados roda por polling HTTP (WebSocket e desativado em modo serverless).
+
+## 5) Deploy no Render (online)
 
 Este projeto ja inclui `Dockerfile` e `render.yaml`.
 
@@ -62,7 +78,7 @@ Passos:
 4. O Render detecta `render.yaml` e cria o servico automaticamente.
 5. Abra a URL publica do Render.
 
-## 5) Integracao de execucao (bridge)
+## 6) Integracao de execucao (bridge)
 
 Quando `BROKER_WEBHOOK_URL` estiver configurada, todo sinal novo e enviado automaticamente para sua plataforma externa.
 
@@ -84,10 +100,10 @@ Payload enviado:
 }
 ```
 
-## 6) Observacao de mercado em tempo real
+## 7) Observacao de mercado em tempo real
 
 O feed padrao usa Yahoo Finance (`EURUSD=X`, etc.). Em alguns ativos pode haver pequeno delay da fonte. Para execucao em corretora real, troque o adaptador por feed direto da corretora/API institucional.
 
-## 7) Aviso importante
+## 8) Aviso importante
 
 Sinais sao probabilisticos e nao garantem resultado financeiro. Use gestao de risco e valide em conta demo antes de qualquer operacao real.
