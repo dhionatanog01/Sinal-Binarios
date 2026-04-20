@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ app_name }}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="bg-ornament bg-1"></div>
+    <div class="bg-ornament bg-2"></div>
+    <main class="container">
+      <header class="hero">
+        <div>
+          <p class="badge">FOREX + BINARY SIGNAL OPS</p>
+          <h1>{{ app_name }}</h1>
+          <p class="sub">
+            Monitoramento em tempo real, ranking da estrategia do dia e gestao de sinais put/call.
+          </p>
+        </div>
+        <div class="hero-meta">
+          <div><span>Pairs</span><strong id="pairs">{{ ", ".join(pairs) }}</strong></div>
+          <div><span>Refresh</span><strong>{{ polling_seconds }}s</strong></div>
+          <div><span>Status</span><strong id="status-pill">Conectando...</strong></div>
+        </div>
+      </header>
+
+      <section class="grid top-grid">
+        <article class="card control-card">
+          <h2>Estrategia ativa</h2>
+          <p>Selecione uma estrategia especifica ou rode todas as habilitadas.</p>
+          <div class="control-row">
+            <select id="strategy-select"></select>
+            <button id="save-selection">Aplicar</button>
+          </div>
+          <div id="selection-feedback" class="feedback"></div>
+        </article>
+
+        <article class="card highlight-card">
+          <h2>Melhor hoje</h2>
+          <div id="best-strategy-block">
+            <p>Aguardando dados...</p>
+          </div>
+        </article>
+
+        <article class="card prices-card">
+          <h2>Precos em tempo real</h2>
+          <div id="prices-grid" class="prices-grid"></div>
+        </article>
+      </section>
+
+      <section class="grid">
+        <article class="card">
+          <h2>Catalogo de estrategias</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Codigo</th>
+                  <th>Nome</th>
+                  <th>Status</th>
+                  <th>Acao</th>
+                </tr>
+              </thead>
+              <tbody id="strategies-body"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="card">
+          <h2>Ranking diario</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Estrategia</th>
+                  <th>Score</th>
+                  <th>Win rate</th>
+                  <th>Amostra</th>
+                </tr>
+              </thead>
+              <tbody id="ranking-body"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <section class="grid">
+        <article class="card">
+          <h2>Sinais ativos</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Pair</th>
+                  <th>Direcao</th>
+                  <th>Estrategia</th>
+                  <th>Conf.</th>
+                  <th>Expira em</th>
+                  <th>Envio</th>
+                  <th>Motivo</th>
+                </tr>
+              </thead>
+              <tbody id="open-signals-body"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="card">
+          <h2>Historico recente</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Horario</th>
+                  <th>Pair</th>
+                  <th>Direcao</th>
+                  <th>Estrategia</th>
+                  <th>Status</th>
+                  <th>Envio</th>
+                  <th>Resultado</th>
+                </tr>
+              </thead>
+              <tbody id="recent-signals-body"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <script>
+      const state = {
+        dashboard: null,
+        strategies: [],
+        selectedStrategy: null,
+      };
+
+      const statusPill = document.getElementById("status-pill");
+      const strategySelect = document.getElementById("strategy-select");
+      const selectionFeedback = document.getElementById("selection-feedback");
+
+      async function fetchJSON(url, options) {
+        const resp = await fetch(url, options);
+        if (!resp.ok) {
+          const payload = await resp.json().catch(() => ({}));
+          throw new Error(payload.detail || `Erro ${resp.status}`);
+        }
+        return await resp.json();
+      }
+
+      function moneyLike(value) {
+        if (typeof value !== "number") return "-";
+        return value.toFixed(5);
+      }
+
+      function pct(value) {
+        if (typeof value !== "number") return "-";
+        return `${(value * 100).toFixed(1)}%`;
+      }
+
+      function timeAgo(iso) {
+        if (!iso) return "-";
+        const ms = Date.now() - new Date(iso).getTime();
+        const sec = Math.floor(ms / 1000);
+        if (sec < 60) return `${sec}s`;
+        const min = Math.floor(sec / 60);
+        if (min < 60) return `${min}m`;
+        const h = Math.floor(min / 60);
+        return `${h}h`;
+      }
+
+      function remainingToExpiry(iso) {
+        if (!iso) return "-";
+        const delta = new Date(iso).getTime() - Date.now();
+        if (delta <= 0) return "expirado";
+        const sec = Math.floor(delta / 1000);
+        const min = Math.floor(sec / 60);
+        const rem = sec % 60;
+        return `${min}m ${String(rem).padStart(2, "0")}s`;
+      }
+
+      function renderBestStrategy(ranking) {
+        const box = document.getElementById("best-strategy-block");
+        if (!ranking || ranking.length === 0) {
+          box.innerHTML = "<p>Sem dados suficientes ainda.</p>";
+          return;
+        }
+        const best = ranking[0];
+        box.innerHTML = `
+          <p class="best-name">${best.strategy_name}</p>
+          <p>Score: <strong>${best.score.toFixed(3)}</strong></p>
+          <p>Win rate: <strong>${pct(best.win_rate)}</strong> | Amostra: <strong>${best.total}</strong></p>
+        `;
+      }
+
+      function renderPrices(prices) {
+        const grid = document.getElementById("prices-grid");
+        const entries = Object.entries(prices || {});
+        if (!entries.length) {
+          grid.innerHTML = "<p>Aguardando feed de mercado...</p>";
+          return;
+        }
+        grid.innerHTML = entries
+          .map(
+            ([pair, item]) => `
+              <div class="price-tile">
+                <p>${pair}</p>
+                <strong>${moneyLike(item.price)}</strong>
+                <span>${timeAgo(item.time)} atras</span>
+              </div>
+            `
+          )
+          .join("");
+      }
+
+      function renderStrategies() {
+        const body = document.getElementById("strategies-body");
+        body.innerHTML = state.strategies
+          .map((item) => {
+            const checked = item.enabled ? "checked" : "";
+            return `
+              <tr>
+                <td>${item.code}</td>
+                <td>${item.name}</td>
+                <td>${item.enabled ? "Habilitada" : "Desabilitada"}</td>
+                <td>
+                  <label class="switch">
+                    <input type="checkbox" data-code="${item.code}" ${checked} />
+                    <span>toggle</span>
+                  </label>
+                </td>
+              </tr>
+            `;
+          })
+          .join("");
+      }
+
+      function renderRanking(ranking) {
+        const body = document.getElementById("ranking-body");
+        if (!ranking || !ranking.length) {
+          body.innerHTML = `<tr><td colspan="5">Sem dados ainda.</td></tr>`;
+          return;
+        }
+        body.innerHTML = ranking
+          .map(
+            (item) => `
+              <tr>
+                <td>${item.rank}</td>
+                <td>${item.strategy_name}</td>
+                <td>${item.score.toFixed(3)}</td>
+                <td>${pct(item.win_rate)}</td>
+                <td>${item.total}</td>
+              </tr>
+            `
+          )
+          .join("");
+      }
+
+      function renderOpenSignals(openSignals) {
+        const body = document.getElementById("open-signals-body");
+        if (!openSignals || !openSignals.length) {
+          body.innerHTML = `<tr><td colspan="7">Sem sinais ativos.</td></tr>`;
+          return;
+        }
+        body.innerHTML = openSignals
+          .map(
+            (sig) => `
+              <tr>
+                <td>${sig.pair}</td>
+                <td class="${sig.direction}">${sig.direction.toUpperCase()}</td>
+                <td>${sig.strategy_code}</td>
+                <td>${pct(sig.confidence)}</td>
+                <td data-expiry="${sig.expiry_time}" class="expiry-cell">${remainingToExpiry(sig.expiry_time)}</td>
+                <td>${sig.dispatch_status || "-"}</td>
+                <td>${sig.reason}</td>
+              </tr>
+            `
+          )
+          .join("");
+      }
+
+      function renderRecentSignals(signals) {
+        const body = document.getElementById("recent-signals-body");
+        if (!signals || !signals.length) {
+          body.innerHTML = `<tr><td colspan="7">Sem historico.</td></tr>`;
+          return;
+        }
+        body.innerHTML = signals
+          .slice(0, 40)
+          .map(
+            (sig) => `
+              <tr>
+                <td>${timeAgo(sig.entry_time)} atras</td>
+                <td>${sig.pair}</td>
+                <td class="${sig.direction}">${sig.direction.toUpperCase()}</td>
+                <td>${sig.strategy_code}</td>
+                <td>${sig.status}</td>
+                <td>${sig.dispatch_status || "-"}</td>
+                <td>${sig.outcome || "-"}</td>
+              </tr>
+            `
+          )
+          .join("");
+      }
+
+      function refreshExpiryCounters() {
+        document.querySelectorAll(".expiry-cell").forEach((cell) => {
+          const expiry = cell.getAttribute("data-expiry");
+          cell.textContent = remainingToExpiry(expiry);
+        });
+      }
+
+      function renderDashboard(data) {
+        state.dashboard = data;
+        renderBestStrategy(data.ranking);
+        renderPrices(data.prices);
+        renderRanking(data.ranking);
+        renderOpenSignals(data.open_signals);
+        renderRecentSignals(data.recent_signals);
+      }
+
+      function syncStrategySelect() {
+        const options = [`<option value="">AUTO (todas habilitadas)</option>`];
+        for (const item of state.strategies) {
+          if (!item.enabled) continue;
+          const selected = state.selectedStrategy === item.code ? "selected" : "";
+          options.push(`<option value="${item.code}" ${selected}>${item.name}</option>`);
+        }
+        strategySelect.innerHTML = options.join("");
+      }
+
+      async function loadStrategies() {
+        const data = await fetchJSON("/api/strategies");
+        state.selectedStrategy = data.selected_strategy;
+        state.strategies = data.strategies;
+        renderStrategies();
+        syncStrategySelect();
+      }
+
+      async function loadDashboard() {
+        const data = await fetchJSON("/api/dashboard");
+        renderDashboard(data);
+      }
+
+      async function init() {
+        await Promise.all([loadStrategies(), loadDashboard()]);
+        bindEvents();
+        connectWS();
+      }
+
+      function bindEvents() {
+        document.getElementById("save-selection").addEventListener("click", async () => {
+          selectionFeedback.textContent = "";
+          const strategy_code = strategySelect.value || null;
+          try {
+            await fetchJSON("/api/strategies/select", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ strategy_code }),
+            });
+            state.selectedStrategy = strategy_code;
+            selectionFeedback.textContent = "Selecao atualizada.";
+            selectionFeedback.className = "feedback ok";
+          } catch (err) {
+            selectionFeedback.textContent = err.message;
+            selectionFeedback.className = "feedback error";
+          }
+        });
+
+        document.addEventListener("change", async (event) => {
+          const target = event.target;
+          if (!target.matches("input[type='checkbox'][data-code]")) return;
+          const code = target.getAttribute("data-code");
+          try {
+            await fetchJSON(`/api/strategies/${code}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ enabled: target.checked }),
+            });
+            await loadStrategies();
+          } catch (err) {
+            target.checked = !target.checked;
+            alert(err.message);
+          }
+        });
+      }
+
+      function connectWS() {
+        const proto = location.protocol === "https:" ? "wss" : "ws";
+        const ws = new WebSocket(`${proto}://${location.host}/ws/live`);
+        ws.onopen = () => {
+          statusPill.textContent = "Ao vivo";
+          statusPill.className = "good";
+        };
+        ws.onclose = () => {
+          statusPill.textContent = "Desconectado";
+          statusPill.className = "bad";
+          setTimeout(connectWS, 2000);
+        };
+        ws.onerror = () => {
+          statusPill.textContent = "Falha";
+          statusPill.className = "bad";
+        };
+        ws.onmessage = (event) => {
+          const msg = JSON.parse(event.data);
+          if (msg.event === "dashboard" && msg.data) {
+            renderDashboard(msg.data);
+          }
+        };
+        setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) ws.send("ping");
+        }, 15000);
+      }
+
+      setInterval(refreshExpiryCounters, 1000);
+      init().catch((err) => {
+        statusPill.textContent = `Erro: ${err.message}`;
+        statusPill.className = "bad";
+      });
+    </script>
+  </body>
+</html>

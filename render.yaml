@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: forex-binary-signal-hub
+    runtime: docker
+    plan: free
+    autoDeploy: true
+    healthCheckPath: /api/health
+    envVars:
+      - key: DB_PATH
+        value: /tmp/data.db
+      - key: FOREX_PAIRS
+        value: EURUSD,GBPUSD,USDJPY
+      - key: POLLING_SECONDS
+        value: "20"
+      - key: BROKER_WEBHOOK_URL
+        sync: false
+      - key: BROKER_AUTH_TOKEN
+        sync: false
